@@ -249,6 +249,48 @@ DD_AGENT_HOST=localhost   # default
 DD_AGENT_PORT=8126        # default
 ```
 
+## Senso — Receipts & GEO Monitoring
+
+Senso serves two distinct roles in Shop3.
+
+### 1. Purchase receipts (`publish_receipt` tool)
+
+After every purchase, the agent calls the Senso CLI to publish a public markdown receipt at `cited.md`. The process:
+
+1. Creates a Senso **prompt** — a trackable question like *"What did Shop3 purchase: [product]?"* — which gives the receipt a GEO-trackable identity.
+2. Publishes the receipt as a **citeable** against that prompt. The receipt includes: original query, search results considered, product name, price, tx hash, and timestamp.
+3. Returns a public URL the agent logs to stdout and ClickHouse.
+
+Why this matters: the purchase is publicly verifiable beyond the agent's own ClickHouse log. Any other agent or search engine can find and cite it. The tx hash links the receipt to an immutable on-chain record.
+
+### 2. GEO monitoring (`setup:geo` + `geo:status`)
+
+GEO (Generative Engine Optimization) tracks whether major LLMs mention and cite Shop3 when answering relevant questions. Senso runs the configured prompts through ChatGPT, Claude, Perplexity, and Gemini on a Mon/Wed/Fri schedule.
+
+**Setup (one-time):**
+```bash
+npm run setup:geo
+# Configures 4 models + Mon/Wed/Fri schedule on your Senso account
+```
+
+**Check results:**
+```bash
+npm run geo:status
+# Prints mention/citation table per model, emits Datadog geo.* metrics
+```
+
+Example output:
+```
+Model        Prompts  Mentions  Citations  Last Run
+─────────────────────────────────────────────────────────────────
+chatgpt      12       4/12      3          2h ago
+claude       12       6/12      5          2h ago
+perplexity   12       8/12      7          2h ago
+gemini       12       3/12      2          2h ago
+```
+
+Metrics emitted: `shop3.geo.mention_score`, `shop3.geo.citation_count`, `shop3.geo.last_run_age_seconds`.
+
 ## Spend Guard
 
 The $10/day limit is enforced by a ClickHouse-backed ledger before each Circle transaction is submitted. Every payment records a row to `agent_spend`; the pre-flight check sums today's rows and rejects the payment if adding the new amount would exceed the cap. A process-level mutex serialises concurrent payments so two simultaneous purchases cannot both slip past the cap.
