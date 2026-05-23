@@ -27,6 +27,15 @@ async function ensureTable() {
       ORDER BY timestamp
     `,
   });
+  await getClient().exec({
+    query: `
+      CREATE TABLE IF NOT EXISTS agent_spend (
+        timestamp DateTime DEFAULT now(),
+        amount_usd Float64
+      ) ENGINE = MergeTree()
+      ORDER BY timestamp
+    `,
+  });
 }
 
 async function logPurchase({ query, selectedResult, price, txHash, sourceUrl }) {
@@ -57,4 +66,25 @@ async function getRecentPurchases(limit = 10) {
   return await result.json();
 }
 
-module.exports = { logPurchase, getRecentPurchases };
+async function recordSpend(amountUSD) {
+  await ensureTable();
+  await getClient().insert({
+    table: 'agent_spend',
+    values: [{ amount_usd: amountUSD }],
+    format: 'JSONEachRow',
+  });
+}
+
+async function getSpendToday() {
+  await ensureTable();
+  const today = new Date().toISOString().slice(0, 10);
+  const result = await getClient().query({
+    query: `SELECT sum(amount_usd) as total FROM agent_spend WHERE toDate(timestamp) = {today:String}`,
+    query_params: { today },
+    format: 'JSONEachRow',
+  });
+  const rows = await result.json();
+  return parseFloat(rows[0]?.total ?? 0);
+}
+
+module.exports = { logPurchase, getRecentPurchases, recordSpend, getSpendToday };

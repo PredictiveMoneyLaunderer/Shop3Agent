@@ -1,4 +1,22 @@
 require('dotenv').config();
+
+const REQUIRED_ENV = [
+  'ANTHROPIC_API_KEY',
+  'NIMBLE_API_KEY',
+  'WALLET_PRIVATE_KEY',
+  'ZERODEV_PROJECT_ID',
+  'ZERODEV_RPC_URL',
+  'CLICKHOUSE_HOST',
+  'CLICKHOUSE_USER',
+  'CLICKHOUSE_PASSWORD',
+];
+
+const missing = REQUIRED_ENV.filter((k) => !process.env[k]);
+if (missing.length > 0) {
+  console.error(`[startup] Missing required env vars: ${missing.join(', ')}`);
+  process.exit(1);
+}
+
 const { runAgent } = require('./agent');
 
 const prompt = process.argv.slice(2).join(' ') || 'Find me the best web data API subscription under $10 and buy it';
