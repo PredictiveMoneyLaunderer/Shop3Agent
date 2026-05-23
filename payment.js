@@ -4,7 +4,7 @@ const axios = require('axios');
 const { withSpan, increment, gauge, timing } = require('./telemetry');
 const { getSpendToday, recordSpend } = require('./memory');
 
-const MAX_DAILY_USD = 10;
+const MAX_DAILY_USD = parseFloat(process.env.MAX_DAILY_USD) || 10;
 
 function getCircleClient() {
   const apiKey = process.env.CIRCLE_API_KEY;
@@ -27,6 +27,26 @@ async function checkSpendLimit(amountUSD) {
   const spentToday = await getSpendToday();
   if (spentToday + amountUSD > MAX_DAILY_USD) {
     throw new Error(`Daily spend limit of $${MAX_DAILY_USD} would be exceeded (used: $${spentToday.toFixed(2)})`);
+  }
+}
+
+async function checkWalletBalance(client, amountUSD) {
+  try {
+    const res = await client.listWalletTokenBalances({ walletId: process.env.CIRCLE_WALLET_ID });
+    const balances = res.data?.tokenBalances ?? [];
+    const usdc = balances.find(
+      (b) => b.token?.symbol === 'USDC' ||
+        b.token?.tokenAddress?.toLowerCase() === process.env.USDC_TOKEN_ADDRESS?.toLowerCase()
+    );
+    const available = parseFloat(usdc?.amount ?? '0');
+    console.log(`[payment] Wallet USDC balance: $${available.toFixed(2)}`);
+    if (available < amountUSD) {
+      throw new Error(`Insufficient USDC balance: $${available.toFixed(2)} available, $${amountUSD} required`);
+    }
+  } catch (err) {
+    if (err.message.startsWith('Insufficient')) throw err;
+    // Balance check is best-effort — don't block payment if API call fails
+    console.warn(`[payment] Could not verify wallet balance (proceeding): ${err.message}`);
   }
 }
 
@@ -60,8 +80,9 @@ async function handle402Payment(paymentInfo) {
   const amountUSD = parseFloat(amount);
   await checkSpendLimit(amountUSD);
 
-  return withSpan('payment.transaction', { token, chain, amount }, async () => {
+  return withSpan('payment.transaction', { token, chain, 'payment.amount_usd': amountUSD }, async (span) => {
     const client = getCircleClient();
+    await checkWalletBalance(client, amountUSD);
 
     let txId;
     try {
@@ -75,9 +96,12 @@ async function handle402Payment(paymentInfo) {
       });
       txId = res.data?.id;
       if (!txId) throw new Error('Circle did not return a transaction ID');
+      span.setTag('payment.circle_tx_id', txId);
       increment('payment.tx.submitted', { token, chain });
       console.log(`[payment] Circle tx submitted: ${txId}`);
     } catch (err) {
+      span.setTag('payment.status', 'submit_failed');
+      span.setTag('error', true);
       increment('payment.tx.error', { token, chain, reason: 'submit_failed' });
       throw err;
     }
@@ -90,12 +114,18 @@ async function handle402Payment(paymentInfo) {
       const confirmMs = Date.now() - confirmStart;
       await recordSpend(amountUSD);
       const spentToday = await getSpendToday();
+      span.setTag('payment.status', 'confirmed');
+      span.setTag('payment.confirmation_ms', confirmMs);
+      span.setTag('payment.tx_hash', txHash);
+      span.setTag('payment.daily_spend_usd', spentToday);
       timing('payment.confirmation_ms', confirmMs, { token, chain });
       gauge('payment.amount_usd', amountUSD, { token, chain });
       gauge('payment.daily_spend_usd', spentToday);
       increment('payment.tx.confirmed', { token, chain });
       console.log(`[payment] Confirmed: ${txHash}`);
     } catch (err) {
+      span.setTag('payment.status', 'confirmation_failed');
+      span.setTag('error', true);
       increment('payment.tx.error', { token, chain, reason: 'confirmation_failed' });
       throw err;
     }

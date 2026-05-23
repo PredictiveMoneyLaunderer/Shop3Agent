@@ -20,22 +20,22 @@ if (missing.length > 0) {
 
 const { runAgent } = require('./agent');
 
-const prompt = process.argv.slice(2).join(' ') || 'Find me the best web data API subscription under $10 and buy it';
+const args = process.argv.slice(2);
+const dryRun = args.includes('--dry-run');
+const promptArgs = args.filter((a) => a !== '--dry-run');
+const prompt = promptArgs.join(' ') || 'Find me the best web data API subscription under $10 and buy it';
 
 console.log('='.repeat(60));
-console.log('  Valution Agent — Autonomous Web3 Shopping');
+console.log('  Shop3 — Autonomous Web3 Shopping Agent');
 console.log('='.repeat(60));
+if (dryRun) console.log('  [DRY RUN MODE]');
 console.log(`\nPrompt: "${prompt}"\n`);
 
-runAgent(prompt)
+runAgent(prompt, { dryRun })
   .then((result) => {
     console.log('\n' + '='.repeat(60));
-    if (result.receiptUrl) {
-      console.log(`\nReceipt: ${result.receiptUrl}`);
-    }
-    if (result.txHash) {
-      console.log(`Tx:      ${result.txHash}`);
-    }
+    if (result.receiptUrl) console.log(`Receipt: ${result.receiptUrl}`);
+    if (result.txHash)     console.log(`Tx:      ${result.txHash}`);
     console.log('='.repeat(60));
   })
   .catch((err) => {

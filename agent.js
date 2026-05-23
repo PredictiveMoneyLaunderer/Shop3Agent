@@ -1,10 +1,12 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const { searchWeb } = require('./search');
 const { mockPaymentFlow, getWalletAddress } = require('./payment');
-const { logPurchase } = require('./memory');
+const { logPurchase, getRecentPurchases } = require('./memory');
 const { publishReceipt } = require('./publish');
-const { withSpan, increment, gauge, timing } = require('./telemetry');
+const { notifyPurchase } = require('./notify');
+const { withSpan, withLLMSpan, increment, gauge, timing } = require('./telemetry');
 
+const MAX_TURNS = parseInt(process.env.MAX_AGENT_TURNS) || 10;
 const client = new Anthropic();
 
 const tools = [
@@ -22,7 +24,7 @@ const tools = [
   },
   {
     name: 'pay_for_purchase',
-    description: 'Pay for a selected product/service from the agent smart wallet using USDC on Base Sepolia. Enforces $10/day spending limit.',
+    description: 'Pay for a selected product/service from the agent smart wallet using USDC on ARC-TESTNET. Enforces a daily spending limit.',
     input_schema: {
       type: 'object',
       properties: {
@@ -68,9 +70,20 @@ const tools = [
       required: ['query', 'selected_result', 'price', 'tx_hash', 'source_url'],
     },
   },
+  {
+    name: 'check_purchase_history',
+    description: 'Check what Shop3 has already purchased. Use this before buying to avoid duplicates.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Number of recent purchases to retrieve (default 10)' },
+      },
+      required: [],
+    },
+  },
 ];
 
-async function executeTool(name, input, context) {
+async function executeTool(name, input, context, dryRun) {
   switch (name) {
     case 'search_web': {
       console.log(`\n[agent] Searching: "${input.query}"`);
@@ -87,6 +100,15 @@ async function executeTool(name, input, context) {
     }
 
     case 'pay_for_purchase': {
+      if (dryRun) {
+        console.log(`\n[agent] DRY RUN — would pay for: ${input.selected_result} (${input.price})`);
+        context.txHash = '0x0000000000000000000000000000000000000000000000000000000000000000';
+        context.selectedResult = input.selected_result;
+        context.price = input.price;
+        context.sourceUrl = input.source_url;
+        increment('payment.dry_run');
+        return { success: true, dry_run: true, tx_hash: context.txHash };
+      }
       console.log(`\n[agent] Paying for: ${input.selected_result} (${input.price})`);
       const start = Date.now();
       const txHash = await withSpan('agent.tool.pay_for_purchase', {
@@ -116,6 +138,10 @@ async function executeTool(name, input, context) {
     }
 
     case 'publish_receipt': {
+      if (dryRun) {
+        console.log(`\n[agent] DRY RUN — skipping receipt publish for: ${input.selected_result}`);
+        return { success: true, dry_run: true, receipt_url: null };
+      }
       console.log(`\n[agent] Publishing receipt to cited.md`);
       const url = await withSpan('agent.tool.publish_receipt', {}, () =>
         publishReceipt({
@@ -131,55 +157,79 @@ async function executeTool(name, input, context) {
       return { success: true, receipt_url: url };
     }
 
+    case 'check_purchase_history': {
+      const purchases = await withSpan('agent.tool.check_purchase_history', {}, () =>
+        getRecentPurchases(input.limit ?? 10)
+      );
+      if (purchases.length === 0) {
+        return { purchases: [], message: 'No purchases yet.' };
+      }
+      return {
+        purchases: purchases.map((p) => ({
+          product: p.selected_result,
+          price: p.price,
+          when: p.timestamp,
+          tx_hash: p.tx_hash,
+        })),
+      };
+    }
+
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
 }
 
-async function runAgent(userPrompt) {
+async function runAgent(userPrompt, { dryRun = false } = {}) {
   const runStart = Date.now();
   increment('agent.run.started');
+  if (dryRun) increment('agent.run.dry_run');
 
   const walletAddress = await getWalletAddress();
   console.log(`\n[agent] Smart wallet: ${walletAddress}`);
+  if (dryRun) console.log('[agent] DRY RUN MODE — no payments or receipts will be submitted');
   console.log(`[agent] Starting: "${userPrompt}"\n`);
 
   const context = {};
-  const messages = [
-    {
-      role: 'user',
-      content: userPrompt,
-    },
-  ];
+  const messages = [{ role: 'user', content: userPrompt }];
 
-  const systemPrompt = `You are an autonomous Web3 shopping agent. Your job is to:
-1. Search the web to find the best option matching the user's request
-2. Evaluate results and select the best one under the user's budget
-3. Pay for it autonomously from your smart wallet (USDC on Base Sepolia testnet)
-4. Log the purchase to the database
-5. Publish a verified receipt
+  const systemPrompt = `You are Shop3, an autonomous Web3 shopping agent. Your job is to:
+1. (Optional) Check purchase history to avoid buying duplicates
+2. Search the web to find the best option matching the user's request
+3. Evaluate results and select the best one under the user's budget
+4. Pay for it autonomously from your smart wallet (USDC on ARC-TESTNET)
+5. Log the purchase to the database
+6. Publish a verified receipt
 
 Your smart wallet address is: ${walletAddress}
-Daily spend limit: $10 USD (enforced on-chain)
-Network: Base Sepolia (testnet)
+Daily spend limit: $${parseFloat(process.env.MAX_DAILY_USD) || 10} USD (enforced on-chain)
+Network: ARC-TESTNET
 Payment token: USDC
+${dryRun ? '\nDRY RUN: You are in simulation mode. Payments will not be executed and receipts will not be published.' : ''}
 
 When selecting a result to buy, prefer options that are:
 - Under $10/month or one-time
 - Have clear pricing
 - Are reputable API services or products
 
-Always complete all 4 steps: search → pay → log → publish. Do not stop early.`;
+Always complete all steps: search → pay → log → publish. Do not stop early.`;
 
-  // Agentic loop
+  let turns = 0;
+
   while (true) {
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
-      system: systemPrompt,
-      tools,
-      messages,
-    });
+    if (turns >= MAX_TURNS) {
+      throw new Error(`Agent exceeded maximum turn limit (${MAX_TURNS}). Aborting to prevent runaway loop.`);
+    }
+    turns++;
+
+    const response = await withLLMSpan('claude-sonnet-4-6', () =>
+      client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 4096,
+        system: systemPrompt,
+        tools,
+        messages,
+      })
+    );
 
     messages.push({ role: 'assistant', content: response.content });
 
@@ -190,8 +240,18 @@ Always complete all 4 steps: search → pay → log → publish. Do not stop ear
         .join('\n');
       timing('agent.run.duration_ms', Date.now() - runStart);
       increment('agent.run.completed');
+      gauge('agent.run.turns', turns);
       console.log('\n[agent] Done.\n');
       console.log(finalText);
+
+      await notifyPurchase({
+        selectedResult: context.selectedResult,
+        price: context.price,
+        txHash: context.txHash,
+        receiptUrl: context.receiptUrl,
+        dryRun,
+      });
+
       return { summary: finalText, ...context };
     }
 
@@ -203,9 +263,10 @@ Always complete all 4 steps: search → pay → log → publish. Do not stop ear
 
         let result;
         try {
-          result = await executeTool(block.name, block.input, context);
+          result = await executeTool(block.name, block.input, context, dryRun);
         } catch (err) {
           console.error(`[agent] Tool error (${block.name}):`, err.message);
+          increment('agent.tool.error', { tool: block.name });
           result = { error: err.message };
         }
 

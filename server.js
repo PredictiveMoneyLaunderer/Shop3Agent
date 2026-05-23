@@ -26,6 +26,9 @@ async function verifyCirclePayment(txHash) {
   return tx?.state === 'CONFIRMED' || tx?.state === 'COMPLETE';
 }
 
+// In-memory replay guard — resets on restart, sufficient for testnet/dev use
+const usedTxHashes = new Set();
+
 app.get('/', (req, res) => {
   res.json({ message: 'Search middleware running', version: '1.0.0' });
 });
@@ -64,6 +67,10 @@ app.get('/search', async (req, res) => {
     });
   }
 
+  if (usedTxHashes.has(paymentProof)) {
+    return res.status(402).json({ error: 'Payment proof already used' });
+  }
+
   try {
     const confirmed = await verifyCirclePayment(paymentProof);
     if (!confirmed) {
@@ -72,6 +79,8 @@ app.get('/search', async (req, res) => {
   } catch {
     return res.status(402).json({ error: 'Could not verify payment transaction via Circle' });
   }
+
+  usedTxHashes.add(paymentProof);
 
   try {
     const numResults = Number(req.query.num_results) || 5;

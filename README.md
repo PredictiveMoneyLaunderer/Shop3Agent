@@ -12,14 +12,21 @@ An autonomous Web3 shopping agent. Give it a prompt, it searches the web, picks 
 ### 💸 Web3 Payments & Safety
 - **Circle Programmable Wallets**: Uses **Circle's Developer-Controlled Wallets** on ARC-TESTNET. The agent holds its own USDC balance and signs transactions server-side via Circle's API — no private key management required.
 - **USDC on ARC-TESTNET**: Facilitates real-world value transfer using stablecoins on ARC-TESTNET, with the agent wallet pre-funded with 20 USDC.
-- **Spend Guard**: A hard-coded safety mechanism that enforces a **$10/day spending limit**. This prevents the agent from runaway spending in the event of an infinite loop or adversarial prompt.
+- **Spend Guard**: A configurable daily spending limit (default $10, set via `MAX_DAILY_USD`). Backed by ClickHouse so it persists across restarts. Prevents runaway spending from infinite loops or adversarial prompts.
+- **Wallet Balance Check**: Verifies on-chain USDC balance before submitting a payment. Fails fast with a clear error rather than letting the Circle API reject mid-flight.
+- **Max Turns Guard**: The agentic loop is capped at `MAX_AGENT_TURNS` (default 10) iterations. If Claude loops without completing, the run aborts and logs an error instead of burning API credits indefinitely.
+- **Dry-Run Mode**: Pass `--dry-run` (or `npm run dry-run`) to simulate a full agent run — search and evaluate without executing any payment or publishing any receipt. Useful for testing prompts and budget planning.
 - **x402 Micropayment Protocol**: Implements a local "Payment Required" middleware. The agent handles `402` status codes by paying the required fee on-chain and retrying the request with a verifiable payment proof header.
 
 ### 📊 Transparency & Observability
 - **Purchase Audit Log**: Every transaction is recorded in **ClickHouse Cloud**, capturing the original user query, selected product, price, and the immutable blockchain transaction hash.
 - **Verified Receipts (cited.md)**: Automatically publishes public, markdown-formatted receipts via the **Senso platform**. These receipts are "citeable," making the agent's actions discoverable by search engines and other AI agents.
-- **Datadog Instrumentation**: Full observability with Datadog APM. Tracks end-to-end agent run durations, per-tool execution spans, and custom metrics for payment success rates and on-chain confirmation times.
+- **Datadog APM + Lapdog**: Full observability with Datadog APM. Tracks end-to-end agent run durations, per-tool execution spans, and custom metrics for payment success rates and on-chain confirmation times. In development, use **lapdog** for a local live dashboard showing every Claude API call with token counts, cost, cache hit rates, and tool traces — no Datadog account required.
 - **GEO Monitoring**: Integrated AI brand visibility tracking. Monitors how major LLMs (ChatGPT, Claude, Perplexity, Gemini) perceive and represent the "Shop3" brand across the web.
+- **Webhook Notifications**: Set `WEBHOOK_URL` to receive a POST on every completed (or dry-run) purchase with product, price, tx hash, and receipt URL.
+- **Scheduled Runs**: `npm run schedule` runs a configurable list of prompts on a repeat interval (set via `SCHEDULED_PROMPTS` and `SCHEDULE_INTERVAL_HOURS`).
+- **Purchase Memory**: The agent can call `check_purchase_history` before buying to avoid repurchasing the same product across separate runs.
+- **Payment Replay Protection**: The x402 search middleware tracks used transaction hashes. A proof that has already unlocked a search result cannot be reused.
 
 ## Quick start
 
@@ -63,7 +70,20 @@ node history.js       # last 10 purchases
 node history.js 25    # last N purchases
 ```
 
-6. (Optional) Run the local search middleware (x402 payment-gated search):
+6. (Optional) Run with **lapdog** for a local LLM observability dashboard:
+
+```bash
+# Install lapdog (one-time)
+pip install ddapm-test-agent
+
+# Run agent with live token/cost/trace dashboard at lapdog.datadoghq.com
+npm run lapdog
+
+# Or run the search server with lapdog
+npm run lapdog:server
+```
+
+7. (Optional) Run the local search middleware (x402 payment-gated search):
 
 ```bash
 npm run start:server
