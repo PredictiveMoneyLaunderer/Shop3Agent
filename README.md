@@ -2,6 +2,18 @@
 
 An autonomous Web3 shopping agent. Give it a prompt, it searches the web, picks the best result, pays for it on-chain with USDC, logs the purchase to a database, and publishes a verified receipt — no human in the loop after the initial prompt.
 
+## Features
+
+- **Autonomous purchasing** — Claude-powered agent handles the full search → evaluate → buy → receipt flow without human intervention
+- **On-chain payments** — USDC transfers on Base Sepolia via a ZeroDev ERC-4337 smart wallet; real blockchain transactions with verifiable tx hashes
+- **x402 payment-gated search** — local Express middleware that returns HTTP 402 Payment Required; agent pays in USDC and retries with a payment proof header, demonstrating machine-to-machine micropayments
+- **$10/day spend guard** — enforced before every payment; blocks transactions that would exceed the daily limit
+- **Purchase audit log** — every purchase written to ClickHouse with full metadata (query, product, price, tx hash, source URL)
+- **Purchase history viewer** — `node history.js [N]` queries ClickHouse and prints the last N purchases with BaseScan links
+- **Verified receipts on cited.md** — each purchase publishes a markdown receipt as a public citeable on `cited.md/shop3` via Senso, discoverable by other AI agents and search engines
+- **AI brand visibility (GEO)** — Senso knowledge base tracks how ChatGPT, Claude, Perplexity, and Gemini represent Shop3 in the agent payments space; runs Mon/Wed/Fri
+- **Datadog APM** — full distributed traces across the agent loop, per-tool spans, and custom metrics for payment success rates, confirmation times, and daily spend
+
 ## Quick start
 
 1. Install dependencies:
