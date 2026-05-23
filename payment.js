@@ -1,3 +1,4 @@
+const { randomUUID } = require('crypto');
 const { initiateDeveloperControlledWalletsClient } = require('@circle-fin/developer-controlled-wallets');
 const { isAddress } = require('viem');
 const axios = require('axios');
@@ -18,6 +19,35 @@ async function getWalletAddress() {
   const addr = process.env.CIRCLE_WALLET_ADDRESS;
   if (!addr) throw new Error('CIRCLE_WALLET_ADDRESS not set');
   return addr;
+}
+
+async function getWalletStatus() {
+  const address = process.env.CIRCLE_WALLET_ADDRESS;
+  const network = process.env.CIRCLE_NETWORK || 'ARC-TESTNET';
+  const dailyCapUsd = MAX_DAILY_USD;
+  let balanceUsdc = null;
+  let spentTodayUsd = 0;
+
+  try {
+    const client = getCircleClient();
+    const res = await client.listWalletTokenBalances({ walletId: process.env.CIRCLE_WALLET_ID });
+    const balances = res.data?.tokenBalances ?? [];
+    const usdc = balances.find(
+      (b) => b.token?.symbol === 'USDC' ||
+        b.token?.tokenAddress?.toLowerCase() === process.env.USDC_TOKEN_ADDRESS?.toLowerCase()
+    );
+    balanceUsdc = parseFloat(usdc?.amount ?? '0');
+  } catch {
+    // non-fatal — banner still prints with 'unavailable'
+  }
+
+  try {
+    spentTodayUsd = await getSpendToday();
+  } catch {
+    // non-fatal
+  }
+
+  return { address, network, balanceUsdc, spentTodayUsd, dailyCapUsd };
 }
 
 async function checkSpendLimit(amountUSD) {
@@ -45,8 +75,29 @@ async function checkWalletBalance(client, amountUSD) {
     }
   } catch (err) {
     if (err.message.startsWith('Insufficient')) throw err;
-    // Balance check is best-effort — don't block payment if API call fails
     console.warn(`[payment] Could not verify wallet balance (proceeding): ${err.message}`);
+  }
+}
+
+function isNonRetryable(err) {
+  const msg = (err?.message ?? '').toUpperCase();
+  return msg.includes('INSUFFICIENT_FUNDS') || msg.includes('POLICY_DENIED') ||
+    msg.includes('DENIED') || msg.includes('CANCELLED');
+}
+
+async function retryWithBackoff(fn, { attempts = 2, delayMs = 5000 } = {}) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (i < attempts - 1 && !isNonRetryable(err)) {
+        console.log(`[payment] Attempt ${i + 1} failed: ${err.message}. Retrying in ${delayMs / 1000}s...`);
+        increment('payment.tx.retried', { attempt: String(i + 1) });
+        await new Promise((r) => setTimeout(r, delayMs));
+      } else {
+        throw err;
+      }
+    }
   }
 }
 
@@ -84,18 +135,24 @@ async function handle402Payment(paymentInfo) {
     const client = getCircleClient();
     await checkWalletBalance(client, amountUSD);
 
+    const idempotencyKey = randomUUID();
     let txId;
+
     try {
-      const res = await client.createTransaction({
-        walletId: process.env.CIRCLE_WALLET_ID,
-        blockchain: process.env.CIRCLE_NETWORK || 'ARC-TESTNET',
-        destinationAddress: payTo,
-        amounts: [amount.toString()],
-        tokenAddress: process.env.USDC_TOKEN_ADDRESS,
-        fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
+      txId = await retryWithBackoff(async () => {
+        const res = await client.createTransaction({
+          walletId: process.env.CIRCLE_WALLET_ID,
+          blockchain: process.env.CIRCLE_NETWORK || 'ARC-TESTNET',
+          destinationAddress: payTo,
+          amounts: [amount.toString()],
+          tokenAddress: process.env.USDC_TOKEN_ADDRESS,
+          fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
+          idempotencyKey,
+        });
+        const id = res.data?.id;
+        if (!id) throw new Error('Circle did not return a transaction ID');
+        return id;
       });
-      txId = res.data?.id;
-      if (!txId) throw new Error('Circle did not return a transaction ID');
       span.setTag('payment.circle_tx_id', txId);
       increment('payment.tx.submitted', { token, chain });
       console.log(`[payment] Circle tx submitted: ${txId}`);
@@ -134,7 +191,6 @@ async function handle402Payment(paymentInfo) {
   });
 }
 
-// Simulate hitting a 402 endpoint (for demo)
 async function fetchWithPayment(url, headers = {}) {
   try {
     const response = await axios.get(url, { headers });
@@ -153,7 +209,6 @@ async function fetchWithPayment(url, headers = {}) {
   }
 }
 
-// Mock a 402 flow for demo when no real paywall endpoint is available
 async function mockPaymentFlow(selectedResult, price) {
   console.log(`[payment] Simulating 402 payment for: ${selectedResult}`);
 
@@ -170,4 +225,4 @@ async function mockPaymentFlow(selectedResult, price) {
   return handle402Payment(mockPaymentInfo);
 }
 
-module.exports = { fetchWithPayment, mockPaymentFlow, getWalletAddress, handle402Payment };
+module.exports = { fetchWithPayment, mockPaymentFlow, getWalletAddress, getWalletStatus, handle402Payment };

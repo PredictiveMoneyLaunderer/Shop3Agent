@@ -143,7 +143,7 @@ Node.js (CommonJS), single-process. The agent, payment, search, logging, and pub
 
 **Senso / cited.md** (`SENSO_API_KEY`)
 - Publishes a markdown receipt as a public citeable at `cited.md/shop3/<slug>`
-- Receipt includes: query, search results considered, product, price, tx hash, BaseScan link
+- Receipt includes: query, search results considered, product, price, and tx hash
 
 ### External Services
 
@@ -191,9 +191,15 @@ DD_AGENT_HOST=localhost   # default
 DD_AGENT_PORT=8126        # default
 ```
 
+## Spend Guard
+
+The $10/day limit is enforced by a ClickHouse-backed ledger before each Circle transaction is submitted. Every payment records a row to `agent_spend`; the pre-flight check sums today's rows and rejects the payment if adding the new amount would exceed the cap. This persists across process restarts (unlike an in-memory guard). The limit is configurable via `MAX_DAILY_USD`.
+
+This is a server-side JS guard — it cannot be bypassed by an external attacker, but could be bypassed by modifying the agent source. For the demo it is the authoritative mechanism; a production deployment could layer on a Circle wallet policy for custodian-level enforcement.
+
 ## Agent Wallet
 
-The agent's smart wallet address on Base Sepolia:
+The agent's Circle wallet on ARC-TESTNET:
 
 ```
 0x490776E3c67986f1A2385413e52FAeE1772A729A

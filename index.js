@@ -2,7 +2,7 @@ require('dotenv').config();
 
 const REQUIRED_ENV = [
   'ANTHROPIC_API_KEY',
-  'NIMBLE_API_KEY',
+  'SEARCH_MIDDLEWARE_URL',   // agent always routes through the x402 bridge
   'CIRCLE_API_KEY',
   'CIRCLE_ENTITY_SECRET',
   'CIRCLE_WALLET_ADDRESS',

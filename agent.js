@@ -1,6 +1,6 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const { searchWeb } = require('./search');
-const { mockPaymentFlow, getWalletAddress } = require('./payment');
+const { mockPaymentFlow, getWalletAddress, getWalletStatus } = require('./payment');
 const { logPurchase, getRecentPurchases } = require('./memory');
 const { publishReceipt } = require('./publish');
 const { notifyPurchase } = require('./notify');
@@ -12,19 +12,30 @@ const client = new Anthropic();
 const tools = [
   {
     name: 'search_web',
-    description: 'Search the web for products, services, or information using Nimble. Returns titles, URLs, and descriptions.',
+    description: 'Search the web for products, services, or information via the Shop3 x402 bridge. Returns structured results.',
     input_schema: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'The search query' },
         num_results: { type: 'number', description: 'Number of results to return (default 5)' },
+        schema: {
+          type: 'object',
+          description: 'Optional structured extraction schema. Specify fields to extract from each result.',
+          properties: {
+            fields: {
+              type: 'array',
+              items: { type: 'string', enum: ['name', 'price', 'url', 'rating', 'vendor', 'description'] },
+              description: 'Fields to extract from each search result',
+            },
+          },
+        },
       },
       required: ['query'],
     },
   },
   {
     name: 'pay_for_purchase',
-    description: 'Pay for a selected product/service from the agent smart wallet using USDC on ARC-TESTNET. Enforces a daily spending limit.',
+    description: 'Pay for a selected product/service from the agent smart wallet using USDC on ARC-TESTNET via Circle. Enforces a daily spending limit.',
     input_schema: {
       type: 'object',
       properties: {
@@ -37,7 +48,7 @@ const tools = [
   },
   {
     name: 'log_to_database',
-    description: 'Log a completed purchase to ClickHouse for audit trail.',
+    description: 'Log a completed purchase to ClickHouse for audit trail and analytics.',
     input_schema: {
       type: 'object',
       properties: {
@@ -89,20 +100,22 @@ async function executeTool(name, input, context, dryRun) {
       console.log(`\n[agent] Searching: "${input.query}"`);
       const start = Date.now();
       const results = await withSpan('agent.tool.search_web', { query: input.query }, () =>
-        searchWeb(input.query, input.num_results ?? 5)
+        searchWeb(input.query, input.num_results ?? 5, input.schema ?? null)
       );
       context.searchResults = results;
+      context.toolsInvoked.push('search_web');
       timing('tool.duration_ms', Date.now() - start, { tool: 'search_web' });
-      gauge('search.results_count', results.length, { query: input.query });
+      gauge('search.results_count', results.length);
       console.log(`[agent] Found ${results.length} results`);
-      results.forEach((r, i) => console.log(`  ${i + 1}. ${r.title} — ${r.url}`));
+      results.forEach((r, i) => console.log(`  ${i + 1}. ${r.title ?? r.name} — ${r.url}`));
       return results;
     }
 
     case 'pay_for_purchase': {
+      context.toolsInvoked.push('pay_for_purchase');
       if (dryRun) {
         console.log(`\n[agent] DRY RUN — would pay for: ${input.selected_result} (${input.price})`);
-        context.txHash = '0x0000000000000000000000000000000000000000000000000000000000000000';
+        context.txHash = '0x00000000000000000000000000000000000000000000000000000000deadbeef';
         context.selectedResult = input.selected_result;
         context.price = input.price;
         context.sourceUrl = input.source_url;
@@ -125,6 +138,8 @@ async function executeTool(name, input, context, dryRun) {
 
     case 'log_to_database': {
       console.log(`\n[agent] Logging purchase to ClickHouse`);
+      context.toolsInvoked.push('log_to_database');
+      const priceUsd = parseFloat((input.price ?? '').replace(/[^0-9.]/g, '')) || 0;
       await withSpan('agent.tool.log_to_database', {}, () =>
         logPurchase({
           query: input.query,
@@ -132,12 +147,17 @@ async function executeTool(name, input, context, dryRun) {
           price: input.price,
           txHash: input.tx_hash,
           sourceUrl: input.source_url,
+          nimbleResultsCount: context.searchResults?.length ?? 0,
+          totalLatencyMs: Date.now() - context.runStart,
+          toolsInvoked: [...context.toolsInvoked],
+          priceUsd,
         })
       );
       return { success: true };
     }
 
     case 'publish_receipt': {
+      context.toolsInvoked.push('publish_receipt');
       if (dryRun) {
         console.log(`\n[agent] DRY RUN — skipping receipt publish for: ${input.selected_result}`);
         return { success: true, dry_run: true, receipt_url: null };
@@ -158,12 +178,11 @@ async function executeTool(name, input, context, dryRun) {
     }
 
     case 'check_purchase_history': {
+      context.toolsInvoked.push('check_purchase_history');
       const purchases = await withSpan('agent.tool.check_purchase_history', {}, () =>
         getRecentPurchases(input.limit ?? 10)
       );
-      if (purchases.length === 0) {
-        return { purchases: [], message: 'No purchases yet.' };
-      }
+      if (purchases.length === 0) return { purchases: [], message: 'No purchases yet.' };
       return {
         purchases: purchases.map((p) => ({
           product: p.selected_result,
@@ -179,32 +198,49 @@ async function executeTool(name, input, context, dryRun) {
   }
 }
 
+async function printStartupBanner(walletAddress, dryRun) {
+  const status = await getWalletStatus().catch(() => null);
+  const bal = status?.balanceUsdc !== null && status?.balanceUsdc !== undefined
+    ? `$${status.balanceUsdc.toFixed(2)} USDC`
+    : 'unavailable';
+  const spent = `$${(status?.spentTodayUsd ?? 0).toFixed(2)}`;
+  const cap = `$${(status?.dailyCapUsd ?? 10).toFixed(2)}`;
+  const network = status?.network ?? process.env.CIRCLE_NETWORK ?? 'ARC-TESTNET';
+
+  console.log('[agent] ' + '─'.repeat(54));
+  console.log(`[agent]  Wallet:       ${walletAddress}`);
+  console.log(`[agent]  Balance:      ${bal}`);
+  console.log(`[agent]  Daily cap:    ${cap}`);
+  console.log(`[agent]  Spent today:  ${spent}`);
+  console.log(`[agent]  Network:      ${network}${dryRun ? '  [DRY RUN]' : ''}`);
+  console.log('[agent] ' + '─'.repeat(54));
+}
+
 async function runAgent(userPrompt, { dryRun = false } = {}) {
   const runStart = Date.now();
   increment('agent.run.started');
   if (dryRun) increment('agent.run.dry_run');
 
   const walletAddress = await getWalletAddress();
-  console.log(`\n[agent] Smart wallet: ${walletAddress}`);
-  if (dryRun) console.log('[agent] DRY RUN MODE — no payments or receipts will be submitted');
-  console.log(`[agent] Starting: "${userPrompt}"\n`);
+  await printStartupBanner(walletAddress, dryRun);
+  console.log(`\n[agent] Starting: "${userPrompt}"\n`);
 
-  const context = {};
+  const context = { toolsInvoked: [], runStart };
   const messages = [{ role: 'user', content: userPrompt }];
 
   const systemPrompt = `You are Shop3, an autonomous Web3 shopping agent. Your job is to:
 1. (Optional) Check purchase history to avoid buying duplicates
-2. Search the web to find the best option matching the user's request
+2. Search the web to find the best option matching the user's request. Use a structured schema when you know the fields you need (e.g. name, price, url).
 3. Evaluate results and select the best one under the user's budget
-4. Pay for it autonomously from your smart wallet (USDC on ARC-TESTNET)
+4. Pay for it autonomously from your smart wallet (USDC on ARC-TESTNET via Circle)
 5. Log the purchase to the database
 6. Publish a verified receipt
 
 Your smart wallet address is: ${walletAddress}
-Daily spend limit: $${parseFloat(process.env.MAX_DAILY_USD) || 10} USD (enforced on-chain)
-Network: ARC-TESTNET
+Daily spend limit: $${parseFloat(process.env.MAX_DAILY_USD) || 10} USD
+Network: ARC-TESTNET (Circle)
 Payment token: USDC
-${dryRun ? '\nDRY RUN: You are in simulation mode. Payments will not be executed and receipts will not be published.' : ''}
+${dryRun ? '\nDRY RUN: Simulation mode. Payments will not be executed and receipts will not be published.' : ''}
 
 When selecting a result to buy, prefer options that are:
 - Under $10/month or one-time

@@ -52,7 +52,7 @@ ${resultList || 'N/A'}
 
 ## Payment Proof
 - **Transaction Hash:** \`${txHash}\`
-- **Chain:** ARC-TESTNET
+- **Chain:** ARC-TESTNET (Circle)
 - **Token:** USDC
 
 ---

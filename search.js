@@ -1,37 +1,16 @@
-const axios = require('axios');
 const { fetchWithPayment } = require('./payment');
 
-async function searchWeb(query, numResults = 5) {
+async function searchWeb(query, numResults = 5, schema = null) {
   const middlewareUrl = process.env.SEARCH_MIDDLEWARE_URL;
-  if (middlewareUrl && process.env.SERVER_MODE !== 'true') {
-    const url = new URL(middlewareUrl);
-    url.searchParams.set('query', query);
-    url.searchParams.set('num_results', String(numResults));
+  if (!middlewareUrl) throw new Error('SEARCH_MIDDLEWARE_URL not set — start the middleware with: npm run start:server');
 
-    const { data } = await fetchWithPayment(url.toString());
-    return data?.results ?? [];
-  }
+  const url = new URL(middlewareUrl);
+  url.searchParams.set('query', query);
+  url.searchParams.set('num_results', String(numResults));
+  if (schema) url.searchParams.set('schema', JSON.stringify(schema));
 
-  const apiKey = process.env.NIMBLE_API_KEY;
-  if (!apiKey) throw new Error('NIMBLE_API_KEY not set');
-
-  const response = await axios.post(
-    'https://sdk.nimbleway.com/v1/search',
-    { query, max_results: numResults },
-    {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-    }
-  );
-
-  const results = response.data?.results ?? [];
-  return results.map((r) => ({
-    title: r.title,
-    url: r.url,
-    description: r.description,
-  }));
+  const { data } = await fetchWithPayment(url.toString());
+  return data?.results ?? [];
 }
 
 module.exports = { searchWeb };
