@@ -7,6 +7,7 @@ An autonomous Web3 shopping agent. Give it a prompt, it searches the web, picks 
 ### 🧠 Agent Intelligence
 - **Autonomous Agentic Loop**: Powered by Anthropic's **Claude 3.5 Sonnet**, the agent runs a continuous "think-act" loop. It uses native tool-calling to independently decide when to search, evaluate products, execute payments, or log results.
 - **Strategic Evaluation**: Unlike simple scripts, the agent evaluates search results against user constraints (budget, reputation, and service type) before deciding to purchase.
+- **Web Search via Nimble**: The agent searches the live web using the **Nimble API** — a managed web data platform that handles CAPTCHAs, bot detection, and proxy rotation automatically. Returns structured results (titles, URLs, descriptions) for any query without scraping infrastructure.
 
 ### 💸 Web3 Payments & Safety
 - **ERC-4337 Smart Wallets**: Utilizes **ZeroDev Kernel accounts** for sophisticated on-chain identity. This allows the agent to hold its own funds and sign transactions programmatically.
