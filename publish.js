@@ -1,4 +1,4 @@
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 
 async function publishReceipt({ query, selectedResult, price, txHash, sourceUrl, searchResults }) {
   const apiKey = process.env.SENSO_API_KEY;
@@ -10,7 +10,7 @@ async function publishReceipt({ query, selectedResult, price, txHash, sourceUrl,
 
   // Create a Senso prompt tied to this purchase so we have a geo_question_id to publish against
   const promptJson = senso(
-    `prompts create --data '${JSON.stringify({ question_text: questionText, type: 'decision' })}'`,
+    ['prompts', 'create', '--data', JSON.stringify({ question_text: questionText, type: 'decision' })],
     apiKey
   );
   const promptId = promptJson.prompt_id ?? promptJson.id;
@@ -18,12 +18,12 @@ async function publishReceipt({ query, selectedResult, price, txHash, sourceUrl,
 
   // Publish the receipt as a citeable on cited.md
   const publishJson = senso(
-    `engine publish --data '${JSON.stringify({
+    ['engine', 'publish', '--data', JSON.stringify({
       geo_question_id: promptId,
       raw_markdown: markdown,
       seo_title: seoTitle,
       summary: `Shop3 autonomously purchased ${selectedResult} for ${price}. Tx: ${txHash}`,
-    })}'`,
+    })],
     apiKey
   );
 
@@ -34,7 +34,7 @@ async function publishReceipt({ query, selectedResult, price, txHash, sourceUrl,
 
 // Run a senso CLI command and return parsed JSON output
 function senso(args, apiKey) {
-  const result = execSync(`senso ${args} --output json --quiet`, {
+  const result = execFileSync('senso', [...args, '--output', 'json', '--quiet'], {
     env: { ...process.env, SENSO_API_KEY: apiKey },
     encoding: 'utf8',
   });
