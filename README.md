@@ -37,6 +37,16 @@ npm run start:server
 node index.js
 ```
 
+## Agent Wallet
+
+The agent's smart wallet address on Base Sepolia:
+
+```
+0x490776E3c67986f1A2385413e52FAeE1772A729A
+```
+
+Fund it with testnet USDC to enable autonomous payments.
+
 ## Contributing
 
 Please read [CONTRIBUTING](.github/CONTRIBUTING.md) before opening issues or PRs.
