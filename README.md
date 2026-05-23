@@ -156,11 +156,11 @@ Node.js (CommonJS), single-process. The agent, payment, search, logging, and pub
 | USDC contract | Payment token | `USDC_TOKEN_ADDRESS` |
 | ClickHouse Cloud | Purchase audit log + spend tracking | `CLICKHOUSE_*` |
 | Senso / cited.md | Receipt publishing | `SENSO_API_KEY` |
-| Datadog | APM + metrics | `DD_API_KEY` |
+| Lapdog / Datadog | Local dev dashboard + production APM | `DD_API_KEY` (production only) |
 
-## Observability (Datadog)
+## Observability (Lapdog + Datadog)
 
-Shop3 is instrumented with [Datadog APM](https://www.datadoghq.com/) via `dd-trace`. All agent runs, tool calls, payments, and on-chain confirmations are traced automatically.
+Shop3 is instrumented via `dd-trace`. Every agent run, tool call, payment, and on-chain confirmation produces a span on `localhost:8126`. In development **[Lapdog](https://docs.datadoghq.com/llm_observability/lapdog/)** captures these locally — no account needed. In production the same spans forward to **Datadog** for persistent traces, dashboards, and alerting.
 
 ### Metrics
 
@@ -182,9 +182,14 @@ APM traces cover the full `search → pay → log → publish` flow with child s
 
 ### Setup
 
-1. Install the Datadog Agent: https://docs.datadoghq.com/agent/
-2. Add to `.env`:
+**Development (Lapdog — no account required):**
+```bash
+pip install ddapm-test-agent
+npm run lapdog        # agent with live dashboard at lapdog.datadoghq.com
+npm run lapdog:server # or the x402 bridge
+```
 
+**Production (Datadog):**
 ```bash
 DD_API_KEY=your_api_key_here
 DD_AGENT_HOST=localhost   # default
