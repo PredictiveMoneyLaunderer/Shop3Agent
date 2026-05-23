@@ -10,8 +10,8 @@ An autonomous Web3 shopping agent. Give it a prompt, it searches the web, picks 
 - **Web Search via Nimble**: The agent searches the live web using the **Nimble API** — a managed web data platform that handles CAPTCHAs, bot detection, and proxy rotation automatically. Returns structured results (titles, URLs, descriptions) for any query without scraping infrastructure.
 
 ### 💸 Web3 Payments & Safety
-- **ERC-4337 Smart Wallets**: Utilizes **ZeroDev Kernel accounts** for sophisticated on-chain identity. This allows the agent to hold its own funds and sign transactions programmatically.
-- **USDC on Base Sepolia**: Facilitates real-world value transfer using stablecoins on the Base Sepolia testnet, ensuring fast and cheap transactions.
+- **Circle Programmable Wallets**: Uses **Circle's Developer-Controlled Wallets** on ARC-TESTNET. The agent holds its own USDC balance and signs transactions server-side via Circle's API — no private key management required.
+- **USDC on ARC-TESTNET**: Facilitates real-world value transfer using stablecoins on ARC-TESTNET, with the agent wallet pre-funded with 20 USDC.
 - **Spend Guard**: A hard-coded safety mechanism that enforces a **$10/day spending limit**. This prevents the agent from runaway spending in the event of an infinite loop or adversarial prompt.
 - **x402 Micropayment Protocol**: Implements a local "Payment Required" middleware. The agent handles `402` status codes by paying the required fee on-chain and retrying the request with a verifiable payment proof header.
 
@@ -98,22 +98,19 @@ Node.js (CommonJS), single-process. The agent, payment, search, logging, and pub
 
 ### Payment
 
-**ZeroDev SDK** (`@zerodev/sdk`)
-- ERC-4337 smart wallet (Kernel account) derived from `WALLET_PRIVATE_KEY`
-- Bundler: ZeroDev RPC (`ZERODEV_RPC_URL`) on Base Sepolia (chain 84532)
+**Circle Programmable Wallets** (`@circle-fin/developer-controlled-wallets`)
+- Developer-controlled wallet on ARC-TESTNET, funded with USDC
+- Auth: `CIRCLE_API_KEY` + `CIRCLE_ENTITY_SECRET` (entity secret never leaves the server)
+- `createTransaction` submits USDC transfer; polls `getTransaction` until `CONFIRMED`
+- Wallet address and ID set via `CIRCLE_WALLET_ADDRESS` / `CIRCLE_WALLET_ID`
 
-**viem**
-- Encodes ERC-20 `transfer(address, uint256)` calldata
-- Converts USD amounts to USDC's 6-decimal raw integer
-- Waits for on-chain transaction receipt
-
-**USDC on Base Sepolia**
-- Contract: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`
-- Direct ERC-20 transfer — no DEX, no swap
+**USDC on ARC-TESTNET**
+- Token contract: `0x3600000000000000000000000000000000000000`
+- Agent wallet pre-funded with 20 USDC testnet balance
 
 **Spend guard**
-- $10/day in-memory limit, checked before every payment
-- Resets at midnight (note: resets on process restart in current implementation)
+- $10/day limit persisted to ClickHouse (`agent_spend` table) — survives restarts
+- Amount validated as a positive finite number before any transaction
 
 ### Database
 
@@ -134,10 +131,10 @@ Node.js (CommonJS), single-process. The agent, payment, search, logging, and pub
 |---|---|---|
 | Anthropic API | Claude LLM (agent brain) | `ANTHROPIC_API_KEY` |
 | Nimble API | Web search | `NIMBLE_API_KEY` |
-| ZeroDev RPC | Smart wallet / tx bundler | `ZERODEV_PROJECT_ID` + `ZERODEV_RPC_URL` |
-| Base Sepolia | L2 blockchain (testnet) | `WALLET_PRIVATE_KEY` |
-| USDC contract | Payment token | on-chain |
-| ClickHouse Cloud | Purchase audit log | `CLICKHOUSE_*` |
+| Circle Programmable Wallets | USDC payments on ARC-TESTNET | `CIRCLE_API_KEY` + `CIRCLE_ENTITY_SECRET` |
+| ARC-TESTNET | L2 blockchain (testnet) | `CIRCLE_WALLET_ID` |
+| USDC contract | Payment token | `USDC_TOKEN_ADDRESS` |
+| ClickHouse Cloud | Purchase audit log + spend tracking | `CLICKHOUSE_*` |
 | Senso / cited.md | Receipt publishing | `SENSO_API_KEY` |
 | Datadog | APM + metrics | `DD_API_KEY` |
 

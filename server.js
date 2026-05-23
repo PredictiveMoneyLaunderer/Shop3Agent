@@ -2,21 +2,28 @@ require('dotenv').config();
 process.env.SERVER_MODE = 'true';
 
 const express = require('express');
-const { createPublicClient, http } = require('viem');
-const { baseSepolia } = require('viem/chains');
+const { initiateDeveloperControlledWalletsClient } = require('@circle-fin/developer-controlled-wallets');
 const { searchWeb } = require('./search');
-
-const publicClient = createPublicClient({ chain: baseSepolia, transport: http() });
 
 const app = express();
 const PORT = parseInt(process.env.SERVER_PORT, 10) || 3000;
 const PAYMENT_PAYTO = process.env.SEARCH_PAYMENT_ADDRESS || '0x1111111111111111111111111111111111111111';
 const PAYMENT_PRICE = process.env.SEARCH_PAYMENT_AMOUNT || '0.001';
 const PAYMENT_TOKEN = process.env.SEARCH_PAYMENT_TOKEN || 'USDC';
-const PAYMENT_CHAIN = process.env.SEARCH_PAYMENT_CHAIN || 'base-sepolia';
+const PAYMENT_CHAIN = process.env.SEARCH_PAYMENT_CHAIN || 'ARC-TESTNET';
 
 function isValidTxHash(value) {
   return typeof value === 'string' && /^0x[a-fA-F0-9]{64}$/.test(value);
+}
+
+async function verifyCirclePayment(txHash) {
+  const client = initiateDeveloperControlledWalletsClient({
+    apiKey: process.env.CIRCLE_API_KEY,
+    entitySecret: process.env.CIRCLE_ENTITY_SECRET,
+  });
+  const res = await client.listTransactions({ txHash });
+  const tx = res.data?.transactions?.[0];
+  return tx?.state === 'CONFIRMED' || tx?.state === 'COMPLETE';
 }
 
 app.get('/', (req, res) => {
@@ -58,12 +65,12 @@ app.get('/search', async (req, res) => {
   }
 
   try {
-    const receipt = await publicClient.getTransactionReceipt({ hash: paymentProof });
-    if (!receipt || receipt.status !== 'success') {
+    const confirmed = await verifyCirclePayment(paymentProof);
+    if (!confirmed) {
       return res.status(402).json({ error: 'Payment transaction not confirmed on-chain' });
     }
   } catch {
-    return res.status(402).json({ error: 'Could not verify payment transaction on-chain' });
+    return res.status(402).json({ error: 'Could not verify payment transaction via Circle' });
   }
 
   try {

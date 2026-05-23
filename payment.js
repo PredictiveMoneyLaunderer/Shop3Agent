@@ -1,29 +1,24 @@
-const { createPublicClient, http, parseUnits, encodeFunctionData, isAddress } = require('viem');
-const { baseSepolia } = require('viem/chains');
-const { privateKeyToAccount } = require('viem/accounts');
-const { createKernelAccountClient } = require('@zerodev/sdk');
+const { initiateDeveloperControlledWalletsClient } = require('@circle-fin/developer-controlled-wallets');
+const { isAddress } = require('viem');
 const axios = require('axios');
 const { withSpan, increment, gauge, timing } = require('./telemetry');
 const { getSpendToday, recordSpend } = require('./memory');
 
-// Minimal ERC-20 transfer ABI
-const ERC20_TRANSFER_ABI = [
-  {
-    name: 'transfer',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'to', type: 'address' },
-      { name: 'amount', type: 'uint256' },
-    ],
-    outputs: [{ name: '', type: 'bool' }],
-  },
-];
-
-// USDC on Base Sepolia (Circle's testnet deployment)
-const USDC_ADDRESS = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
-
 const MAX_DAILY_USD = 10;
+
+function getCircleClient() {
+  const apiKey = process.env.CIRCLE_API_KEY;
+  const entitySecret = process.env.CIRCLE_ENTITY_SECRET;
+  if (!apiKey) throw new Error('CIRCLE_API_KEY not set');
+  if (!entitySecret) throw new Error('CIRCLE_ENTITY_SECRET not set');
+  return initiateDeveloperControlledWalletsClient({ apiKey, entitySecret });
+}
+
+async function getWalletAddress() {
+  const addr = process.env.CIRCLE_WALLET_ADDRESS;
+  if (!addr) throw new Error('CIRCLE_WALLET_ADDRESS not set');
+  return addr;
+}
 
 async function checkSpendLimit(amountUSD) {
   if (isNaN(amountUSD) || amountUSD <= 0) {
@@ -35,48 +30,24 @@ async function checkSpendLimit(amountUSD) {
   }
 }
 
-function getWalletClient() {
-  const ZERODEV_PROJECT_ID = process.env.ZERODEV_PROJECT_ID;
-  const ZERODEV_RPC_URL = process.env.ZERODEV_RPC_URL;
-
-  if (!ZERODEV_PROJECT_ID) {
-    throw new Error('ZERODEV_PROJECT_ID is not set. Add it to your .env file.');
+// Poll Circle until the transaction reaches a terminal state, return blockchain txHash
+async function waitForCircleTx(client, txId, timeoutMs = 120000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const res = await client.getTransaction({ id: txId });
+    const tx = res.data?.transaction;
+    const state = tx?.state;
+    if (state === 'CONFIRMED' || state === 'COMPLETE') {
+      return tx.txHash;
+    }
+    if (state === 'FAILED' || state === 'CANCELLED' || state === 'DENIED') {
+      throw new Error(`Circle transaction ${txId} ended with state: ${state}`);
+    }
+    await new Promise((r) => setTimeout(r, 2000));
   }
-  if (!ZERODEV_RPC_URL) {
-    throw new Error('ZERODEV_RPC_URL is not set. Add it to your .env file.');
-  }
-
-  const privateKey = process.env.WALLET_PRIVATE_KEY;
-  if (!privateKey) throw new Error('WALLET_PRIVATE_KEY not set');
-
-  const account = privateKeyToAccount(
-    privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`
-  );
-
-  const rpcUrl = ZERODEV_RPC_URL.trim();
-  const transport = http(rpcUrl);
-
-  const publicClient = createPublicClient({
-    chain: baseSepolia,
-    transport,
-  });
-
-  const walletClient = createKernelAccountClient({
-    account,
-    chain: baseSepolia,
-    client: publicClient,
-    bundlerTransport: transport,
-  });
-
-  return { account, walletClient, publicClient };
+  throw new Error(`Circle transaction ${txId} timed out after ${timeoutMs}ms`);
 }
 
-async function getWalletAddress() {
-  const { account } = getWalletClient();
-  return account.address;
-}
-
-// Handle a 402 Payment Required response and pay
 async function handle402Payment(paymentInfo) {
   const { payTo, amount, token, chain } = paymentInfo;
 
@@ -90,36 +61,32 @@ async function handle402Payment(paymentInfo) {
   await checkSpendLimit(amountUSD);
 
   return withSpan('payment.transaction', { token, chain, amount }, async () => {
-    const { account, walletClient, publicClient } = getWalletClient();
+    const client = getCircleClient();
 
-    const amountRaw = parseUnits(amount.toString(), 6);
-
-    const data = encodeFunctionData({
-      abi: ERC20_TRANSFER_ABI,
-      functionName: 'transfer',
-      args: [payTo, amountRaw],
-    });
-
-    let txHash;
+    let txId;
     try {
-      txHash = await walletClient.sendTransaction({
-        account,
-        to: USDC_ADDRESS,
-        data,
-        chain: baseSepolia,
+      const res = await client.createTransaction({
+        walletId: process.env.CIRCLE_WALLET_ID,
+        blockchain: process.env.CIRCLE_NETWORK || 'ARC-TESTNET',
+        destinationAddress: payTo,
+        amounts: [amount.toString()],
+        tokenAddress: process.env.USDC_TOKEN_ADDRESS,
+        fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
       });
+      txId = res.data?.id;
+      if (!txId) throw new Error('Circle did not return a transaction ID');
       increment('payment.tx.submitted', { token, chain });
+      console.log(`[payment] Circle tx submitted: ${txId}`);
     } catch (err) {
       increment('payment.tx.error', { token, chain, reason: 'submit_failed' });
       throw err;
     }
 
-    console.log(`[payment] Tx submitted: ${txHash}`);
-    console.log('[payment] Waiting for confirmation...');
-
+    console.log('[payment] Waiting for on-chain confirmation...');
     const confirmStart = Date.now();
+    let txHash;
     try {
-      await publicClient.waitForTransactionReceipt({ hash: txHash });
+      txHash = await waitForCircleTx(client, txId);
       const confirmMs = Date.now() - confirmStart;
       await recordSpend(amountUSD);
       const spentToday = await getSpendToday();
@@ -127,17 +94,17 @@ async function handle402Payment(paymentInfo) {
       gauge('payment.amount_usd', amountUSD, { token, chain });
       gauge('payment.daily_spend_usd', spentToday);
       increment('payment.tx.confirmed', { token, chain });
+      console.log(`[payment] Confirmed: ${txHash}`);
     } catch (err) {
       increment('payment.tx.error', { token, chain, reason: 'confirmation_failed' });
       throw err;
     }
 
-    console.log(`[payment] Confirmed: ${txHash}`);
     return txHash;
   });
 }
 
-// Simulate hitting a 402 endpoint (for demo — real x402 endpoints return this in headers/body)
+// Simulate hitting a 402 endpoint (for demo)
 async function fetchWithPayment(url, headers = {}) {
   try {
     const response = await axios.get(url, { headers });
@@ -146,14 +113,10 @@ async function fetchWithPayment(url, headers = {}) {
     if (err.response?.status === 402) {
       const paymentInfo = err.response.data;
       console.log('[payment] Got 402 Payment Required:', paymentInfo);
-
       const txHash = await handle402Payment(paymentInfo);
-
-      // Retry with payment proof
       const retryResponse = await axios.get(url, {
         headers: { ...headers, 'x-payment-proof': txHash },
       });
-
       return { data: retryResponse.data, txHash };
     }
     throw err;
@@ -168,14 +131,13 @@ async function mockPaymentFlow(selectedResult, price) {
   const amount = (!isNaN(rawAmount) && rawAmount > 0) ? rawAmount.toFixed(2) : '1.00';
 
   const mockPaymentInfo = {
-    payTo: '0x742d35Cc6634C0532925a3b8D4C9C2b5b2B2b2b2',
+    payTo: '0x7dc1517b622edc0d945978312a5496ed6784ee51',
     amount,
     token: 'USDC',
-    chain: 'base-sepolia',
+    chain: process.env.CIRCLE_NETWORK || 'ARC-TESTNET',
   };
 
-  const txHash = await handle402Payment(mockPaymentInfo);
-  return txHash;
+  return handle402Payment(mockPaymentInfo);
 }
 
 module.exports = { fetchWithPayment, mockPaymentFlow, getWalletAddress, handle402Payment };

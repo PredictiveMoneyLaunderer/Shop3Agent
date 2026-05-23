@@ -3,9 +3,10 @@ require('dotenv').config();
 const REQUIRED_ENV = [
   'ANTHROPIC_API_KEY',
   'NIMBLE_API_KEY',
-  'WALLET_PRIVATE_KEY',
-  'ZERODEV_PROJECT_ID',
-  'ZERODEV_RPC_URL',
+  'CIRCLE_API_KEY',
+  'CIRCLE_ENTITY_SECRET',
+  'CIRCLE_WALLET_ADDRESS',
+  'CIRCLE_WALLET_ID',
   'CLICKHOUSE_HOST',
   'CLICKHOUSE_USER',
   'CLICKHOUSE_PASSWORD',
@@ -33,7 +34,7 @@ runAgent(prompt)
       console.log(`\nReceipt: ${result.receiptUrl}`);
     }
     if (result.txHash) {
-      console.log(`Tx:      https://sepolia.basescan.org/tx/${result.txHash}`);
+      console.log(`Tx:      ${result.txHash}`);
     }
     console.log('='.repeat(60));
   })

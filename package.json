@@ -14,6 +14,7 @@
   "type": "commonjs",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.98.0",
+    "@circle-fin/developer-controlled-wallets": "^10.3.1",
     "@clickhouse/client": "^1.18.5",
     "@zerodev/ecdsa-validator": "^5.4.9",
     "@zerodev/sdk": "^5.5.10",
