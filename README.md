@@ -249,6 +249,71 @@ DD_AGENT_HOST=localhost   # default
 DD_AGENT_PORT=8126        # default
 ```
 
+## ClickHouse — Audit Log, Spend Tracking & Analytics
+
+ClickHouse serves three roles in Shop3.
+
+### 1. Purchase audit log (`agent_purchases`)
+
+Every completed purchase writes a row with:
+
+| Column | Example |
+|---|---|
+| `timestamp` | `2026-05-23 14:02:11` |
+| `query` | `"Find me a web data API under $10"` |
+| `selected_result` | `"Nimble API — Starter Plan"` |
+| `price` | `"$9.00/mo"` |
+| `price_usd` | `9.0` |
+| `tx_hash` | `0xabc...` |
+| `source_url` | `https://nimbleway.com/pricing` |
+| `nimble_results_count` | `5` |
+| `total_latency_ms` | `42300` |
+| `tools_invoked` | `["search_web", "pay_for_purchase", "log_to_database", "publish_receipt"]` |
+
+```bash
+npm run history        # last 10 purchases
+npm run history 25     # last N purchases
+```
+
+### 2. Spend tracking (`agent_spend`)
+
+Every payment writes a row with `amount_usd` and `timestamp`. Before each Circle transaction, the agent sums today's rows:
+
+```sql
+SELECT sum(amount_usd) FROM agent_spend WHERE toDate(timestamp) = today()
+```
+
+If `spentToday + newAmount > MAX_DAILY_USD` the payment is rejected before anything hits the blockchain. A process-level mutex serialises concurrent payments so two simultaneous calls can't both pass the check.
+
+### 3. Analytics (`npm run history:stats`)
+
+Runs three aggregation queries against `agent_purchases`:
+
+```bash
+npm run history:stats
+```
+
+```
+── Shop3 Analytics (last 7 days) ──────────────────────────
+
+Top source domains:
+  12   nimbleway.com
+  4    rapidapi.com
+  2    apilayer.com
+
+Tools per purchase:
+  4 tools → 15 purchase(s)
+  3 tools → 2 purchase(s)
+
+Summary:
+  Purchases:    17
+  Total spent:  $87.50
+  Avg price:    $5.15
+  Avg duration: 38.2s
+```
+
+This is the ClickHouse-as-analytics-engine angle — using its aggregation functions (`sum`, `avg`, `count`, `extract`, `length`) across the purchase log, not just `SELECT * LIMIT N`.
+
 ## Senso — Receipts & GEO Monitoring
 
 Senso serves two distinct roles in Shop3.
