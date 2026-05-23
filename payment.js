@@ -7,6 +7,14 @@ const { getSpendToday, recordSpend } = require('./memory');
 
 const MAX_DAILY_USD = parseFloat(process.env.MAX_DAILY_USD) || 10;
 
+// Serialises concurrent payments so the spend check + record is atomic within this process.
+let _spendLock = Promise.resolve();
+function withSpendLock(fn) {
+  const next = _spendLock.then(fn);
+  _spendLock = next.catch(() => {});
+  return next;
+}
+
 function getCircleClient() {
   const apiKey = process.env.CIRCLE_API_KEY;
   const entitySecret = process.env.CIRCLE_ENTITY_SECRET;
@@ -122,13 +130,19 @@ async function waitForCircleTx(client, txId, timeoutMs = 120000) {
 async function handle402Payment(paymentInfo) {
   const { payTo, amount, token, chain } = paymentInfo;
 
-  if (!isAddress(payTo)) {
+  if (!isAddress(payTo, { strict: false })) {
     throw new Error(`Invalid payTo address: ${payTo}`);
   }
 
   console.log(`[payment] 402 received — paying ${amount} ${token} to ${payTo} on ${chain}`);
 
   const amountUSD = parseFloat(amount);
+
+  // Lock serialises the check+record pair so concurrent calls can't both pass the cap.
+  return withSpendLock(() => _makePayment({ payTo, amount, amountUSD, token, chain }));
+}
+
+async function _makePayment({ payTo, amount, amountUSD, token, chain }) {
   await checkSpendLimit(amountUSD);
 
   return withSpan('payment.transaction', { token, chain, 'payment.amount_usd': amountUSD }, async (span) => {
