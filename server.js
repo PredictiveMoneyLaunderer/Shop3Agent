@@ -2,7 +2,11 @@ require('dotenv').config();
 process.env.SERVER_MODE = 'true';
 
 const express = require('express');
+const { createPublicClient, http } = require('viem');
+const { baseSepolia } = require('viem/chains');
 const { searchWeb } = require('./search');
+
+const publicClient = createPublicClient({ chain: baseSepolia, transport: http() });
 
 const app = express();
 const PORT = parseInt(process.env.SERVER_PORT, 10) || 3000;
@@ -51,6 +55,15 @@ app.get('/search', async (req, res) => {
         token: PAYMENT_TOKEN,
       },
     });
+  }
+
+  try {
+    const receipt = await publicClient.getTransactionReceipt({ hash: paymentProof });
+    if (!receipt || receipt.status !== 'success') {
+      return res.status(402).json({ error: 'Payment transaction not confirmed on-chain' });
+    }
+  } catch {
+    return res.status(402).json({ error: 'Could not verify payment transaction on-chain' });
   }
 
   try {

@@ -1,4 +1,4 @@
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 async function publishReceipt({ query, selectedResult, price, txHash, sourceUrl, searchResults }) {
   const apiKey = process.env.SENSO_API_KEY;
@@ -10,7 +10,8 @@ async function publishReceipt({ query, selectedResult, price, txHash, sourceUrl,
 
   // Create a Senso prompt tied to this purchase so we have a geo_question_id to publish against
   const promptJson = senso(
-    `prompts create --data '${JSON.stringify({ question_text: questionText, type: 'decision' })}'`,
+    'prompts create',
+    ['--data', JSON.stringify({ question_text: questionText, type: 'decision' })],
     apiKey
   );
   const promptId = promptJson.prompt_id ?? promptJson.id;
@@ -18,12 +19,13 @@ async function publishReceipt({ query, selectedResult, price, txHash, sourceUrl,
 
   // Publish the receipt as a citeable on cited.md
   const publishJson = senso(
-    `engine publish --data '${JSON.stringify({
+    'engine publish',
+    ['--data', JSON.stringify({
       geo_question_id: promptId,
       raw_markdown: markdown,
       seo_title: seoTitle,
       summary: `Shop3 autonomously purchased ${selectedResult} for ${price}. Tx: ${txHash}`,
-    })}'`,
+    })],
     apiKey
   );
 
@@ -32,16 +34,18 @@ async function publishReceipt({ query, selectedResult, price, txHash, sourceUrl,
   return url;
 }
 
-// Run a senso CLI command and return parsed JSON output
-function senso(args, apiKey) {
-  const result = execSync(`senso ${args} --output json --quiet`, {
+// Run a senso CLI command and return parsed JSON output.
+// Uses spawnSync with an explicit argv array — no shell interpolation, no injection surface.
+function senso(subcommand, flags, apiKey) {
+  const argv = [...subcommand.split(' '), ...flags, '--output', 'json', '--quiet'];
+  const result = spawnSync('senso', argv, {
     env: { ...process.env, SENSO_API_KEY: apiKey },
     encoding: 'utf8',
   });
-  // Strip any ANSI escape codes and redact the API key if it appears in the output
-  let sanitized = result.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '');
-  sanitized = sanitized.replace(new RegExp(apiKey, 'g'), (m) => m.slice(0, 10) + '...').trim();
-  return JSON.parse(sanitized);
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`senso exited ${result.status}: ${result.stderr}`);
+  const clean = result.stdout.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '').trim();
+  return JSON.parse(clean);
 }
 
 function buildReceiptMarkdown({ query, selectedResult, price, txHash, sourceUrl, searchResults }) {

@@ -1,9 +1,10 @@
-const { createPublicClient, http, parseUnits, encodeFunctionData } = require('viem');
+const { createPublicClient, http, parseUnits, encodeFunctionData, isAddress } = require('viem');
 const { baseSepolia } = require('viem/chains');
 const { privateKeyToAccount } = require('viem/accounts');
 const { createKernelAccountClient } = require('@zerodev/sdk');
 const axios = require('axios');
 const { withSpan, increment, gauge, timing } = require('./telemetry');
+const { getSpendToday, recordSpend } = require('./memory');
 
 // Minimal ERC-20 transfer ABI
 const ERC20_TRANSFER_ABI = [
@@ -22,20 +23,16 @@ const ERC20_TRANSFER_ABI = [
 // USDC on Base Sepolia (Circle's testnet deployment)
 const USDC_ADDRESS = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
 
-// Daily spend guard (in-memory for demo — production would use on-chain policy)
-const spendTracker = { date: null, total: 0 };
 const MAX_DAILY_USD = 10;
 
-function checkSpendLimit(amountUSD) {
-  const today = new Date().toISOString().slice(0, 10);
-  if (spendTracker.date !== today) {
-    spendTracker.date = today;
-    spendTracker.total = 0;
+async function checkSpendLimit(amountUSD) {
+  if (isNaN(amountUSD) || amountUSD <= 0) {
+    throw new Error(`Invalid payment amount: ${amountUSD}`);
   }
-  if (spendTracker.total + amountUSD > MAX_DAILY_USD) {
-    throw new Error(`Daily spend limit of $${MAX_DAILY_USD} would be exceeded (used: $${spendTracker.total})`);
+  const spentToday = await getSpendToday();
+  if (spentToday + amountUSD > MAX_DAILY_USD) {
+    throw new Error(`Daily spend limit of $${MAX_DAILY_USD} would be exceeded (used: $${spentToday.toFixed(2)})`);
   }
-  spendTracker.total += amountUSD;
 }
 
 function getWalletClient() {
@@ -83,10 +80,14 @@ async function getWalletAddress() {
 async function handle402Payment(paymentInfo) {
   const { payTo, amount, token, chain } = paymentInfo;
 
+  if (!isAddress(payTo)) {
+    throw new Error(`Invalid payTo address: ${payTo}`);
+  }
+
   console.log(`[payment] 402 received — paying ${amount} ${token} to ${payTo} on ${chain}`);
 
   const amountUSD = parseFloat(amount);
-  checkSpendLimit(amountUSD);
+  await checkSpendLimit(amountUSD);
 
   return withSpan('payment.transaction', { token, chain, amount }, async () => {
     const { account, walletClient, publicClient } = getWalletClient();
@@ -120,9 +121,11 @@ async function handle402Payment(paymentInfo) {
     try {
       await publicClient.waitForTransactionReceipt({ hash: txHash });
       const confirmMs = Date.now() - confirmStart;
+      await recordSpend(amountUSD);
+      const spentToday = await getSpendToday();
       timing('payment.confirmation_ms', confirmMs, { token, chain });
       gauge('payment.amount_usd', amountUSD, { token, chain });
-      gauge('payment.daily_spend_usd', spendTracker.total);
+      gauge('payment.daily_spend_usd', spentToday);
       increment('payment.tx.confirmed', { token, chain });
     } catch (err) {
       increment('payment.tx.error', { token, chain, reason: 'confirmation_failed' });
@@ -161,9 +164,12 @@ async function fetchWithPayment(url, headers = {}) {
 async function mockPaymentFlow(selectedResult, price) {
   console.log(`[payment] Simulating 402 payment for: ${selectedResult}`);
 
+  const rawAmount = parseFloat(price.replace(/[^0-9.]/g, ''));
+  const amount = (!isNaN(rawAmount) && rawAmount > 0) ? rawAmount.toFixed(2) : '1.00';
+
   const mockPaymentInfo = {
     payTo: '0x742d35Cc6634C0532925a3b8D4C9C2b5b2B2b2b2',
-    amount: price.replace('$', '').replace('/mo', '').trim() || '1.00',
+    amount,
     token: 'USDC',
     chain: 'base-sepolia',
   };
