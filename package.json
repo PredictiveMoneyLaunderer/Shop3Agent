@@ -6,7 +6,9 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start:server": "node server.js",
-    "history": "node history.js"
+    "history": "node history.js",
+    "setup:geo": "node scripts/setup-geo.js",
+    "geo:status": "node scripts/geo-status.js"
   },
   "keywords": [],
   "author": "",
