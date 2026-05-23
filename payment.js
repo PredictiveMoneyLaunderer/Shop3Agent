@@ -60,7 +60,7 @@ async function handle402Payment(paymentInfo) {
   const amountUSD = parseFloat(amount);
   await checkSpendLimit(amountUSD);
 
-  return withSpan('payment.transaction', { token, chain, amount }, async () => {
+  return withSpan('payment.transaction', { token, chain, 'payment.amount_usd': amountUSD }, async (span) => {
     const client = getCircleClient();
 
     let txId;
@@ -75,9 +75,12 @@ async function handle402Payment(paymentInfo) {
       });
       txId = res.data?.id;
       if (!txId) throw new Error('Circle did not return a transaction ID');
+      span.setTag('payment.circle_tx_id', txId);
       increment('payment.tx.submitted', { token, chain });
       console.log(`[payment] Circle tx submitted: ${txId}`);
     } catch (err) {
+      span.setTag('payment.status', 'submit_failed');
+      span.setTag('error', true);
       increment('payment.tx.error', { token, chain, reason: 'submit_failed' });
       throw err;
     }
@@ -90,12 +93,18 @@ async function handle402Payment(paymentInfo) {
       const confirmMs = Date.now() - confirmStart;
       await recordSpend(amountUSD);
       const spentToday = await getSpendToday();
+      span.setTag('payment.status', 'confirmed');
+      span.setTag('payment.confirmation_ms', confirmMs);
+      span.setTag('payment.tx_hash', txHash);
+      span.setTag('payment.daily_spend_usd', spentToday);
       timing('payment.confirmation_ms', confirmMs, { token, chain });
       gauge('payment.amount_usd', amountUSD, { token, chain });
       gauge('payment.daily_spend_usd', spentToday);
       increment('payment.tx.confirmed', { token, chain });
       console.log(`[payment] Confirmed: ${txHash}`);
     } catch (err) {
+      span.setTag('payment.status', 'confirmation_failed');
+      span.setTag('error', true);
       increment('payment.tx.error', { token, chain, reason: 'confirmation_failed' });
       throw err;
     }

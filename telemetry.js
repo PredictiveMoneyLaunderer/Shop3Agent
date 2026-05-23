@@ -6,9 +6,10 @@ const tracer = require('dd-trace').init({
   logInjection: true,
 });
 
-// Wrap an async fn in a named span, attaching arbitrary tags
+// Wrap an async fn in a named span. The span is passed as the first arg to fn
+// so callers can call span.setTag() to attach dynamic results.
 async function withSpan(name, tags, fn) {
-  return tracer.trace(name, { tags }, fn);
+  return tracer.trace(name, { tags }, (span) => fn(span));
 }
 
 // Wrap a Claude API call so lapdog captures it as an LLM span with token/cost metadata.
