@@ -11,6 +11,23 @@ async function withSpan(name, tags, fn) {
   return tracer.trace(name, { tags }, fn);
 }
 
+// Wrap a Claude API call so lapdog captures it as an LLM span with token/cost metadata.
+// usage = { input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens }
+// model = e.g. 'claude-sonnet-4-6'
+async function withLLMSpan(model, fn) {
+  return tracer.trace('claude.completion', { tags: { 'llm.provider': 'anthropic', 'llm.model': model } }, async (span) => {
+    const result = await fn();
+    const usage = result?.usage;
+    if (usage && span) {
+      span.setTag('llm.usage.input_tokens', usage.input_tokens ?? 0);
+      span.setTag('llm.usage.output_tokens', usage.output_tokens ?? 0);
+      span.setTag('llm.usage.cache_read_tokens', usage.cache_read_input_tokens ?? 0);
+      span.setTag('llm.usage.cache_creation_tokens', usage.cache_creation_input_tokens ?? 0);
+    }
+    return result;
+  });
+}
+
 // Increment a counter metric
 function increment(metric, tags = {}) {
   tracer.dogstatsd.increment(`shop3.${metric}`, 1, tagsArray(tags));
@@ -30,4 +47,4 @@ function tagsArray(obj) {
   return Object.entries(obj).map(([k, v]) => `${k}:${v}`);
 }
 
-module.exports = { tracer, withSpan, increment, gauge, timing };
+module.exports = { tracer, withSpan, withLLMSpan, increment, gauge, timing };

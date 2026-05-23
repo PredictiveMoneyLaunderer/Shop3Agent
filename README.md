@@ -18,7 +18,7 @@ An autonomous Web3 shopping agent. Give it a prompt, it searches the web, picks 
 ### 📊 Transparency & Observability
 - **Purchase Audit Log**: Every transaction is recorded in **ClickHouse Cloud**, capturing the original user query, selected product, price, and the immutable blockchain transaction hash.
 - **Verified Receipts (cited.md)**: Automatically publishes public, markdown-formatted receipts via the **Senso platform**. These receipts are "citeable," making the agent's actions discoverable by search engines and other AI agents.
-- **Datadog Instrumentation**: Full observability with Datadog APM. Tracks end-to-end agent run durations, per-tool execution spans, and custom metrics for payment success rates and on-chain confirmation times.
+- **Datadog APM + Lapdog**: Full observability with Datadog APM. Tracks end-to-end agent run durations, per-tool execution spans, and custom metrics for payment success rates and on-chain confirmation times. In development, use **lapdog** for a local live dashboard showing every Claude API call with token counts, cost, cache hit rates, and tool traces — no Datadog account required.
 - **GEO Monitoring**: Integrated AI brand visibility tracking. Monitors how major LLMs (ChatGPT, Claude, Perplexity, Gemini) perceive and represent the "Shop3" brand across the web.
 
 ## Quick start
@@ -63,7 +63,20 @@ node history.js       # last 10 purchases
 node history.js 25    # last N purchases
 ```
 
-6. (Optional) Run the local search middleware (x402 payment-gated search):
+6. (Optional) Run with **lapdog** for a local LLM observability dashboard:
+
+```bash
+# Install lapdog (one-time)
+pip install ddapm-test-agent
+
+# Run agent with live token/cost/trace dashboard at lapdog.datadoghq.com
+npm run lapdog
+
+# Or run the search server with lapdog
+npm run lapdog:server
+```
+
+7. (Optional) Run the local search middleware (x402 payment-gated search):
 
 ```bash
 npm run start:server

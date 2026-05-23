@@ -3,7 +3,7 @@ const { searchWeb } = require('./search');
 const { mockPaymentFlow, getWalletAddress } = require('./payment');
 const { logPurchase } = require('./memory');
 const { publishReceipt } = require('./publish');
-const { withSpan, increment, gauge, timing } = require('./telemetry');
+const { withSpan, withLLMSpan, increment, gauge, timing } = require('./telemetry');
 
 const client = new Anthropic();
 
@@ -173,13 +173,15 @@ Always complete all 4 steps: search → pay → log → publish. Do not stop ear
 
   // Agentic loop
   while (true) {
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
-      system: systemPrompt,
-      tools,
-      messages,
-    });
+    const response = await withLLMSpan('claude-sonnet-4-6', () =>
+      client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 4096,
+        system: systemPrompt,
+        tools,
+        messages,
+      })
+    );
 
     messages.push({ role: 'assistant', content: response.content });
 
