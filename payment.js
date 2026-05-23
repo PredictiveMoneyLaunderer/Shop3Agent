@@ -1,6 +1,7 @@
-const { createPublicClient, createWalletClient, http, parseUnits, encodeFunctionData } = require('viem');
+const { createPublicClient, http, parseUnits, encodeFunctionData } = require('viem');
 const { baseSepolia } = require('viem/chains');
 const { privateKeyToAccount } = require('viem/accounts');
+const { createKernelAccountClient } = require('@zerodev/sdk');
 const axios = require('axios');
 
 // Minimal ERC-20 transfer ABI
@@ -57,15 +58,16 @@ function getWalletClient() {
   const rpcUrl = ZERODEV_RPC_URL.trim();
   const transport = http(rpcUrl);
 
-  const walletClient = createWalletClient({
-    account,
+  const publicClient = createPublicClient({
     chain: baseSepolia,
     transport,
   });
 
-  const publicClient = createPublicClient({
+  const walletClient = createKernelAccountClient({
+    account,
     chain: baseSepolia,
-    transport,
+    client: publicClient,
+    bundlerTransport: transport,
   });
 
   return { account, walletClient, publicClient };
