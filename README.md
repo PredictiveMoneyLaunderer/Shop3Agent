@@ -5,7 +5,7 @@ An autonomous Web3 shopping agent. Give it a prompt, it searches the web, picks 
 ## Features
 
 ### 🧠 Agent Intelligence
-- **Autonomous Agentic Loop**: Powered by Anthropic's **Claude 3.5 Sonnet**, the agent runs a continuous "think-act" loop. It uses native tool-calling to independently decide when to search, evaluate products, execute payments, or log results.
+- **Autonomous Agentic Loop**: Powered by the **Anthropic Claude API**, the agent runs a continuous "think-act" loop with a configurable turn cap to prevent runaway execution. It uses native tool-calling to independently decide when to search, evaluate products, execute payments, or log results — with no human in the loop after the initial prompt.
 - **Strategic Evaluation**: Unlike simple scripts, the agent evaluates search results against user constraints (budget, reputation, and service type) before deciding to purchase.
 - **Web Search via Nimble**: The agent searches the live web using the **Nimble API** — a managed web data platform that handles CAPTCHAs, bot detection, and proxy rotation automatically. Returns structured results (titles, URLs, descriptions) for any query without scraping infrastructure.
 
