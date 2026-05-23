@@ -21,7 +21,7 @@ An autonomous Web3 shopping agent. Give it a prompt, it searches the web, picks 
 ### 📊 Transparency & Observability
 - **Purchase Audit Log**: Every transaction is recorded in **ClickHouse Cloud**, capturing the original user query, selected product, price, and the immutable blockchain transaction hash.
 - **Verified Receipts (cited.md)**: Automatically publishes public, markdown-formatted receipts via the **Senso platform**. These receipts are "citeable," making the agent's actions discoverable by search engines and other AI agents.
-- **Datadog APM + Lapdog**: Full observability with Datadog APM. Tracks end-to-end agent run durations, per-tool execution spans, and custom metrics for payment success rates and on-chain confirmation times. In development, use **lapdog** for a local live dashboard showing every Claude API call with token counts, cost, cache hit rates, and tool traces — no Datadog account required.
+- **Lapdog + Datadog**: In development, run `npm run lapdog` for a live local dashboard at lapdog.datadoghq.com — every Claude API call with token counts, cost, cache hit rates, payment spans, and tool traces with no account required. In production, the same instrumentation forwards to **Datadog** for persistent APM traces, custom metrics, and alerting.
 - **GEO Monitoring**: Integrated AI brand visibility tracking. Monitors how major LLMs (ChatGPT, Claude, Perplexity, Gemini) perceive and represent the "Shop3" brand across the web.
 - **Webhook Notifications**: Set `WEBHOOK_URL` to receive a POST on every completed (or dry-run) purchase with product, price, tx hash, and receipt URL.
 - **Scheduled Runs**: `npm run schedule` runs a configurable list of prompts on a repeat interval (set via `SCHEDULED_PROMPTS` and `SCHEDULE_INTERVAL_HOURS`).
