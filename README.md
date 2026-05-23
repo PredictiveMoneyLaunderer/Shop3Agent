@@ -10,7 +10,20 @@ Shop3 — Node.js project (agent.js, index.js, memory.js, payment.js, publish.js
 npm install
 ```
 
-2. Run the app (if applicable):
+2. Copy `.env.example` to `.env` and fill in your secrets:
+
+```bash
+cp .env.example .env
+```
+
+3. Make sure the following Zerodev payment gateway values are set in `.env`:
+
+```bash
+ZERODEV_PROJECT_ID=391415d7-7b73-4531-ba86-94268ecedfef
+ZERODEV_RPC_URL=https://rpc.zerodev.app/api/v3/391415d7-7b73-4531-ba86-94268ecedfef/chain/84532
+```
+
+4. Run the app:
 
 ```bash
 node index.js
