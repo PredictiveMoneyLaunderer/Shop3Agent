@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(nimble --version)",
+      "Bash(nimble --help)",
+      "Bash(powershell -Command \"[System.Environment]::SetEnvironmentVariable\\('NIMBLE_API_KEY', '30de3962c7554b6aa8cd52987502b758b50a08c5769642e38a9a2638c891175a', 'User'\\)\")",
+      "Bash(NIMBLE_API_KEY='30de3962c7554b6aa8cd52987502b758b50a08c5769642e38a9a2638c891175a' nimble search --query \"test\")",
+      "Bash(npm init *)",
+      "Bash(npm install *)",
+      "Bash(NIMBLE_API_KEY=30de3962c7554b6aa8cd52987502b758b50a08c5769642e38a9a2638c891175a node -e ' *)",
+      "Bash(nimble search *)",
+      "Bash(nimble extract *)",
+      "Bash(NIMBLE_API_KEY=30de3962c7554b6aa8cd52987502b758b50a08c5769642e38a9a2638c891175a nimble search --query \"best web data API subscription under 10 dollars\" --max-results 3 --format json)",
+      "Bash(NIMBLE_API_KEY=30de3962c7554b6aa8cd52987502b758b50a08c5769642e38a9a2638c891175a nimble --debug search --query \"test\" --max-results 1)",
+      "Bash(git --version)",
+      "Bash(gh --version)",
+      "Bash(git init *)",
+      "Bash(git add *)"
+    ]
+  }
+}

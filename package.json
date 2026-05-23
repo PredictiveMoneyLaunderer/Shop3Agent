@@ -1,0 +1,23 @@
+{
+  "name": "valution-agent",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.98.0",
+    "@clickhouse/client": "^1.18.5",
+    "@zerodev/ecdsa-validator": "^5.4.9",
+    "@zerodev/sdk": "^5.5.10",
+    "axios": "^1.16.1",
+    "dotenv": "^17.4.2",
+    "permissionless": "^0.3.5",
+    "viem": "^2.50.4"
+  }
+}
